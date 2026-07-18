@@ -7,7 +7,7 @@ package dev.tclawyered.app.core
  */
 object Constants {
     /** Hive backend base URL. Update at cutover to the deployed Railway URL. */
-    const val HIVE_BASE_URL = "https://api.tclawyered.dev"
+    const val HIVE_BASE_URL = "https://t-c-lawyered-production.up.railway.app"
 
     /** Provider API endpoints. User keys only — never ours. */
     object Endpoints {
