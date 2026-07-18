@@ -1,120 +1,89 @@
-# T&C Lawyered — Android App
+# T&C Lawyered — Android
 
-Native Android client (Kotlin + Jetpack Compose) for the same privacy-first
-mission as the Chrome extension: detect, summarize, and diff Terms & Conditions
-and Privacy Policies in plain English, on your own AI key.
+**You clicked agree. We actually read it.**
 
-It talks to the **same hive backend** as the Chrome extension — nothing there
-changes. Only `{ hash, summary }` ever leaves the device, and only after the
-user's own LLM produces the summary.
+A privacy-first Android app that reads Terms & Conditions and Privacy Policies
+for you and explains them in plain English — TL;DR, key risks, what data is
+collected, who it's shared with, and your rights. It runs on **your own** AI key,
+and nothing about you ever leaves your phone.
 
-> This is the standalone Android repo, split out from the main
-> [T&C Lawyered](https://github.com/tousifahmed20/T-C-Lawyered) repo (which holds
-> the Chrome extension + hive backend). The shared-core files below stay in
-> lock-step with the extension there.
+> Sibling of the Chrome extension in the main
+> [T&C Lawyered](https://github.com/tousifahmed20/T-C-Lawyered) repo. Both share
+> the same hive backend, so a policy summarized on one client is instantly
+> available on the other.
 
-> Status: **Slices 1–5 (core) complete.** Shared core, LLM provider layer, the
-> full summarize pipeline, Room storage, capture + overlay + share surfaces,
-> history, native TTS, and data-safety are all wired end-to-end (see
-> [Roadmap](#roadmap)).
+## 📲 Install
 
-## How input gets in (two surfaces, by design)
+1. Download the latest **`app-debug.apk`** from the
+   [Releases page](https://github.com/tousifahmed20/tc-lawyered-android/releases/latest).
+2. Open it on your phone and tap **Install**. If prompted, allow *Install unknown
+   apps* for your browser or files app (Android's normal sideload step).
+3. Open the app → **Settings** → add an API key for one provider (Anthropic,
+   OpenAI, Gemini, or [OpenRouter, which has free models](https://openrouter.ai/models)).
 
-Mobile OS sandboxing means no app can silently watch another app. So we use two
-complementary surfaces:
+That's it. Requires Android 8.0 (API 26) or newer.
 
-1. **Share sheet** — `Share → T&C Lawyered` from any app or browser hands us a
-   link or selected text. Best for full, multi-screen policy pages.
-   (`share/ShareReceiverActivity.kt`)
-2. **Floating bubble + screen capture + on-device OCR** — a hovering bubble
-   (`overlay/BubbleService.kt`) that, on tap, captures the current screen
-   (`capture/ScreenCaptureService.kt`, MediaProjection) and reads it with ML Kit
-   OCR (`capture/OcrExtractor.kt`). Best for short in-app consent popups.
+## How you feed it a policy
 
-Both keep everything on-device. The rationale (OCR is weak on long/multi-screen
-docs; share/URL is preferred there) lives in the main repo's `docs/`.
+Android sandboxes apps so none can silently watch another. So there are two ways in:
+
+- **Share sheet** — from any app or browser, **Share → T&C Lawyered** hands over a
+  link or selected text. Best for full, multi-screen policy pages.
+- **Floating bubble** — a hovering bubble captures the current screen and reads it
+  with on-device OCR. Best for short in-app consent pop-ups. With the optional
+  accessibility permission it can auto-scroll a long page and stitch the whole thing.
+
+Either way, the text is processed on-device; only the extracted policy text goes to
+*your* AI provider to be summarized.
+
+## Privacy
+
+- **No accounts, no tracking, no analytics.**
+- Your API key is encrypted on-device (Android Keystore) and only ever sent to the
+  provider you choose.
+- Breach checks are matched **on your phone** — the site you're on is never sent out.
+- The only thing that ever leaves the device is a hashed policy + its summary, and
+  only after an authenticity check. Nothing that identifies you.
+
+## Build from source
+
+Requires Android Studio (Ladybug+) and JDK 17. The Gradle wrapper is committed
+(pinned to 8.11.1), so no system Gradle is needed.
+
+```bash
+./gradlew assembleDebug   # → app/build/outputs/apk/debug/app-debug.apk
+```
+
+`local.properties` (your SDK path) is machine-specific and git-ignored — use
+forward slashes: `sdk.dir=C:/Users/you/AppData/Local/Android/Sdk`.
+
+> ⚠️ Clone to a path with **no `&`** in it — an `&` anywhere in the absolute path
+> breaks the native build tools (aapt2/d8) mid-build.
+
+The overlay and screen-capture features need a real device (or emulator) to grant
+the draw-over-apps and MediaProjection permissions.
 
 ## Architecture
 
 ```
-android/app/src/main/java/dev/tclawyered/app/
-├── core/          Shared logic ported 1:1 from the extension (must stay in sync)
-│   ├── Constants.kt   Hive URL, thresholds, RECHECK_TTL — mirrors CONSTANTS.js
-│   ├── Hasher.kt      SHA-256 + whitespace normalization (identical to hasher.js)
-│   ├── Domain.kt      Root-domain normalization (identical to domain.js)
-│   ├── Chunker.kt     Token estimate + overlapping split (chunker.js)
-│   └── Prompts.kt     All LLM prompts (prompts.js)
-├── model/         Summary.kt, PolicyType.kt — the SummaryJSON schema, wire-compatible
-├── data/          HiveClient (hive.js contract), SettingsRepository (DataStore),
-│                  local/ (Room: entities, dao, db, LocalStore + staleness rule),
-│                  safety/ (BreachClient — HIBP, ReputationClient — AI track record)
-├── pipeline/      SummarizePipeline orchestrator + Summarizer/Validator/Differ
-├── llm/           Provider abstraction + adapters (openrouter/anthropic/openai/gemini)
-├── crypto/        KeyVault.kt — Android Keystore AES-GCM key encryption
-├── content/       PolicyFetcher + HtmlExtractor — fetch a shared URL → visible text
-├── capture/       OcrExtractor, CaptureSession, ScreenCaptureService — screen→text
-├── overlay/       BubbleService.kt — floating bubble (tap=capture, long-press=finish)
-├── audio/         Tts.kt — native Android text-to-speech (free, offline)
-├── share/         ShareReceiverActivity.kt — the share-sheet entry point
-└── ui/            MainActivity (home/summarize), SettingsActivity, HistoryActivity, SummaryView
+app/src/main/java/dev/tclawyered/app/
+├── core/       Hash, domain-normalization, chunking, prompts — kept byte-for-byte
+│               in sync with the extension so cross-client hive hits work
+├── llm/        Provider abstraction + adapters (OpenRouter / Anthropic / OpenAI / Gemini)
+├── pipeline/   hash → hive lookup → validate → summarize → diff → gated upload
+├── data/       Hive client, encrypted settings, Room storage, breach + reputation lookups
+├── capture/    Screen capture (MediaProjection) + ML Kit OCR
+├── overlay/    Floating bubble + summary card
+├── share/      Share-sheet entry point
+├── audio/      Native text-to-speech
+└── ui/         Home, Settings, History, Summary
 ```
 
-**Why these stay in lock-step with the extension:** the hash is the shared cache
-key across all clients, so `Hasher` and `Domain` must be byte-for-byte identical
-to the JS, and `Summary`/`HiveClient` must match the backend contract in the
-main repo's [`docs/PHASE2.md`](https://github.com/tousifahmed20/T-C-Lawyered/blob/main/docs/PHASE2.md).
-Any drift silently breaks cross-client hive hits.
+The hash is the shared cache key across all clients, so `core/Hasher` and
+`core/Domain` must stay identical to the extension's JS. See the main repo's
+[`docs/PHASE2.md`](https://github.com/tousifahmed20/T-C-Lawyered/blob/main/docs/PHASE2.md)
+for the backend contract.
 
-## Build
+## License
 
-Requires Android Studio (Ladybug or newer) and JDK 17.
-
-```bash
-# From Android Studio: File → Open → select this repo, let Gradle sync.
-# Or CLI (with a local Android SDK):
-./gradlew assembleDebug   # → app/build/outputs/apk/debug/app-debug.apk
-```
-
-> The Gradle wrapper (`gradlew`, `gradlew.bat`, `gradle-wrapper.jar`) is committed
-> and pinned to Gradle 8.11.1, so it builds standalone — no system Gradle needed.
-> `local.properties` (SDK path) is machine-specific and git-ignored; use forward
-> slashes (`sdk.dir=C:/Users/you/AppData/Local/Android/Sdk`).
->
-> ⚠️ **Clone to a path with no `&` in it.** An `&` anywhere in the absolute path
-> breaks the native build tools (aapt2/d8) mid-build. `C:\dev\tc-lawyered-android`
-> is fine; `C:\T&C\…` is not.
-
-Requires a real device or emulator for the overlay + screen-capture permissions.
-
-## Permissions the headline features need
-
-- `SYSTEM_ALERT_WINDOW` (draw over other apps) — the bubble. Requested at runtime.
-- `MediaProjection` screen-capture consent — granted per session via the system dialog.
-- `FOREGROUND_SERVICE*` — keep the bubble/capture alive with a visible notification.
-
-## Roadmap
-
-- [x] Slice 1 — project skeleton, shared core (hash/domain/chunk/prompts), hive
-      client, capture + overlay + share scaffolds, onboarding tour.
-- [x] Slice 2 — LLM provider layer (OpenRouter, Anthropic, OpenAI, Gemini),
-      Android Keystore key encryption, DataStore settings repo, settings screen.
-- [x] Slice 3 — `SummarizePipeline` (hash → hive lookup → validate → summarize →
-      diff → gated upload) with the 2-month re-check + graceful degradation,
-      Room storage (snapshots/sites + history + prune), and a functional summary
-      view wired end-to-end for the share-TEXT path.
-- [x] Slice 4 — shared-URL page fetch + HTML text extraction; bubble tap →
-      CaptureSession → OCR → pipeline (tap to grab each screen, long-press to
-      summarize); History screen; native TTS ("Listen") on summaries.
-- [x] Slice 5 (core) — data-safety: HIBP breaches (on-device match) + AI track
-      record (cached, generated on the fresh path); severity colours on the
-      "What changed" card; Gradle version pinned via wrapper properties.
-- [x] Wrapper JAR committed (builds standalone); on-device verification of the
-      capture/auto-read/kill-switch flow.
-- [ ] Slice 5b — premium OpenAI TTS, protection-tips videos (YouTube key),
-      glossary tooltips.
-
-## Not doing on Android
-
-- Accessibility-service auto-detect: technically possible (auto-detects consent
-  dialogs, reads other apps' text) but carries real Play Store policy risk. Kept
-  out of v1; revisit only with clear policy/legal justification.
+[MIT](LICENSE) — open source, no warranty.
